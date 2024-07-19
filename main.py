@@ -4,9 +4,14 @@ import venv
 import subprocess
 import sqlite3
 import platform
+import psutil
+import json
+from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QTextEdit, QLabel, QFileDialog
+from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import Qt
 
 # Lista de dependencias requeridas
-required_modules = ['PyQt6', 'pyttsx3']
+required_modules = ['PyQt6', 'pyttsx3', 'psutil']
 
 def generate_requirements():
     if not os.path.exists('requirements.txt'):
@@ -62,11 +67,73 @@ if not is_venv():
 
 check_and_install_dependencies()
 
-# Ahora podemos importar los módulos requeridos
-from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QTextEdit, QLabel
-from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import Qt
 import pyttsx3
+
+class Mahoraga:
+    def __init__(self):
+        self.os_info = None
+        self.resources_info = None
+        self.odoo_modules = []
+        self.odoo_path = None
+
+    def learn_environment(self):
+        self.detect_os()
+        self.optimize_resources()
+
+    def detect_os(self):
+        self.os_info = {
+            "system": platform.system(),
+            "release": platform.release(),
+            "version": platform.version(),
+            "machine": platform.machine(),
+            "processor": platform.processor()
+        }
+        print(f"Sistema operativo detectado: {json.dumps(self.os_info, indent=2)}")
+
+    def optimize_resources(self):
+        self.resources_info = {
+            "cpu_count": psutil.cpu_count(),
+            "cpu_freq": psutil.cpu_freq()._asdict(),
+            "memory": psutil.virtual_memory()._asdict(),
+            "disk": psutil.disk_usage('/')._asdict()
+        }
+        print(f"Información de recursos: {json.dumps(self.resources_info, indent=2)}")
+
+    def learn_odoo_structure(self, odoo_path):
+        self.odoo_path = odoo_path
+        if os.path.exists(self.odoo_path):
+            for root, dirs, files in os.walk(self.odoo_path):
+                if '__manifest__.py' in files:
+                    module_name = os.path.basename(root)
+                    self.odoo_modules.append({
+                        "name": module_name,
+                        "path": root,
+                        "files": self.get_module_files(root)
+                    })
+            print(f"Se han encontrado {len(self.odoo_modules)} módulos de Odoo.")
+        else:
+            print("La ruta especificada no existe.")
+
+    def get_module_files(self, module_path):
+        files = []
+        for root, _, filenames in os.walk(module_path):
+            for filename in filenames:
+                if filename.endswith('.py'):
+                    files.append(os.path.join(root, filename))
+        return files
+
+    def analyze_odoo_tests(self):
+        if not self.odoo_path:
+            return "Por favor, primero especifica la ruta de los módulos de Odoo."
+        test_files = []
+        for module in self.odoo_modules:
+            for file in module['files']:
+                if 'tests' in file:
+                    with open(file, 'r') as f:
+                        content = f.read()
+                        if 'unittest' in content or 'test' in content.lower():
+                            test_files.append(file)
+        return f"Se han encontrado {len(test_files)} archivos de test en los módulos de Odoo."
 
 class Zegion(QWidget):
     def __init__(self):
@@ -74,6 +141,7 @@ class Zegion(QWidget):
         self.init_ui()
         self.init_tts()
         self.init_db()
+        self.mahoraga = Mahoraga()
 
     def init_ui(self):
         self.setWindowTitle('Zegion Assistant')
@@ -121,6 +189,20 @@ class Zegion(QWidget):
             return "Modo activo"
         elif command.lower() == "activo":
             return f"Path de los módulos: {os.getcwd()}"
+        elif command.lower().startswith("aprender entorno"):
+            self.mahoraga.learn_environment()
+            return "Análisis del entorno completado."
+        elif command.lower().startswith("set odoo path"):
+            path = command.split("set odoo path", 1)[1].strip()
+            if not path:
+                path = QFileDialog.getExistingDirectory(self, "Seleccionar directorio de módulos Odoo")
+            if path:
+                self.mahoraga.learn_odoo_structure(path)
+                return f"Ruta de Odoo establecida: {path}"
+            else:
+                return "No se seleccionó ninguna ruta."
+        elif command.lower() == "analizar tests odoo":
+            return self.mahoraga.analyze_odoo_tests()
         else:
             return "Comando no reconocido"
 
@@ -144,19 +226,6 @@ class Sukuna:
     def generate_test_report(self):
         # Lógica para generar informe de test
         pass
-
-class Mahoraga:
-    def __init__(self):
-        # Implementar red neuronal de adaptación
-        pass
-
-    def learn_environment(self):
-        # Paso 1: Detectar sistema operativo
-        os_name = platform.system()
-        print(f"Sistema operativo detectado: {os_name}")
-        # Paso 2: Optimizar recursos de consulta
-        # Paso 3: Aprender estructura de módulos Odoo
-        # Implementar lógica aquí
 
 class Combat:
     def __init__(self):
