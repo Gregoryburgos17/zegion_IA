@@ -1,13 +1,72 @@
 import os
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QTextEdit, QLabel, QFileDialog, QProgressBar, QPlainTextEdit
+import sys
+import subprocess
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QTextEdit, QLabel, QFileDialog, QProgressBar, QPlainTextEdit, QInputDialog
 from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from database_manager import DatabaseManager
 from environment_analysis import EnvironmentAnalysisThread
 from odoo_analysis import OdooAnalysisThread
 from mahoraga import Mahoraga
 import pyttsx3
 import json
+
+class OdooTestThread(QThread):
+    progress_update = pyqtSignal(int, str)
+    result_ready = pyqtSignal(str)
+
+    def __init__(self, odoo_path, config_path, db_name, module_name):
+        super().__init__()
+        self.odoo_path = odoo_path
+        self.config_path = config_path
+        self.db_name = db_name
+        self.module_name = module_name
+
+    def run(self):
+        try:
+            # Configurar el PYTHONPATH
+            server_path = os.path.join(self.odoo_path, 'server')
+            sys.path.insert(0, server_path)
+            os.environ['PYTHONPATH'] = f"{server_path};{os.environ.get('PYTHONPATH', '')}"
+
+            # Definir la ruta al ejecutable de Python y odoo-bin
+            python_path = r'D:\Odoo_16\python\python.exe'
+            odoo_bin_path = r'D:\Odoo_16\server\odoo-bin'
+
+            command = [
+                python_path,
+                odoo_bin_path,
+                "-c", self.config_path,
+                "-d", self.db_name,
+                "--test-enable",
+                "--stop-after-init",
+                "--log-level=test",
+                "-i", self.module_name,
+                "-u", self.module_name
+            ]
+            # Ejecutar el comando
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            print(process)
+            # Leer la salida en tiempo real
+            while True:
+                output = process.stdout.readline()
+                if output == '' and process.poll() is not None:
+                    break
+                if output:
+                    self.progress_update.emit(50, output.strip())
+
+            # Obtener el código de retorno
+            rc = process.poll()
+            print(rc)
+            # Emitir el resultado
+            if rc == 0:
+                self.result_ready.emit(f"Pruebas completadas exitosamente para el módulo {self.module_name}")
+            else:
+                stderr_output = process.stderr.read()
+                self.result_ready.emit(f"Error en las pruebas del módulo {self.module_name}. Código de salida: {rc}\n\nError:\n{stderr_output}")
+
+        except Exception as e:
+            self.result_ready.emit(f"Error al ejecutar las pruebas: {str(e)}")
 
 class Zegion(QWidget):
     def __init__(self):
@@ -72,8 +131,26 @@ class Zegion(QWidget):
             return self.run_odoo_tests()
         elif command.lower() == "predecir optimización":
             return self.predict_optimization()
+        elif command.lower() == "run":
+            return self.run()
         else:
             return "Comando no reconocido"
+
+    def run(self):
+        self.progress_bar.setVisible(True)
+        
+        # Valores predefinidos para pruebas
+        odoo_path = r'D:\Odoo_16'
+        config_path = r'D:\Odoo_16\server\odoo.conf'
+        db_name = 'ada_16'
+        module_name = 'account_accountant'  # Puedes cambiar esto al módulo que quieras probar
+
+        self.test_thread = OdooTestThread(odoo_path, config_path, db_name, module_name)
+        self.test_thread.progress_update.connect(self.update_progress_with_message)
+        self.test_thread.result_ready.connect(self.display_odoo_test_result)
+        self.test_thread.start()
+        
+        return f"Ejecutando pruebas de Odoo para el módulo {module_name}..."
 
     def analyze_environment(self):
         self.progress_bar.setVisible(True)
@@ -120,14 +197,26 @@ class Zegion(QWidget):
         if not paths:
             return "No hay rutas de Odoo registradas. Por favor, añade una ruta primero."
         
-        for path_id, path in paths:
-            self.analysis_thread = OdooAnalysisThread(path, path_id)
-            self.analysis_thread.progress_update.connect(self.update_progress_with_message)
-            self.analysis_thread.result_ready.connect(self.display_odoo_test_result)
-            self.analysis_thread.module_analyzed.connect(self.save_odoo_module_with_test)
-            self.analysis_thread.start()
+        odoo_path = paths[0][1]  # Assuming the first path is the Odoo server path
         
-        return f"Ejecutando pruebas de Odoo en {len(paths)} rutas..."
+        config_path, ok = QInputDialog.getText(self, "Configuración de Odoo", "Ingrese la ruta del archivo de configuración de Odoo:")
+        if not ok or not config_path:
+            return "No se proporcionó la ruta del archivo de configuración."
+        
+        db_name, ok = QInputDialog.getText(self, "Base de datos", "Ingrese el nombre de la base de datos:")
+        if not ok or not db_name:
+            return "No se proporcionó el nombre de la base de datos."
+        
+        module_name, ok = QInputDialog.getText(self, "Módulo", "Ingrese el nombre del módulo a probar:")
+        if not ok or not module_name:
+            return "No se proporcionó el nombre del módulo."
+
+        self.test_thread = OdooTestThread(odoo_path, config_path, db_name, module_name)
+        self.test_thread.progress_update.connect(self.update_progress_with_message)
+        self.test_thread.result_ready.connect(self.display_odoo_test_result)
+        self.test_thread.start()
+        
+        return f"Ejecutando pruebas de Odoo para el módulo {module_name}..."
 
     def predict_optimization(self):
         environment_data = self.db_manager.get_last_environment_analysis()
@@ -187,6 +276,10 @@ class Zegion(QWidget):
         self.progress_bar.setVisible(False)
         self.response_text.setPlainText(result)
         self.speak("Ejecución de pruebas de Odoo completada.")
+        
+        # Save test result to database
+        module_name = result.split("para el módulo")[-1].strip().split()[0]
+        self.db_manager.update_test_result(module_name, result)
 
     def save_odoo_module_with_test(self, module_name, module_path, code_content, test_content, version, path_id, test_result):
         self.db_manager.save_odoo_module(module_name, module_path, code_content, test_content, version, path_id)
